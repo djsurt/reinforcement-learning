@@ -1,9 +1,9 @@
 import numpy as np
 from pettingzoo import AECEnv
-from pettingzoo.utils import agent_selector
+from pettingzoo.utils.agent_selector import agent_selector
 import gymnasium.spaces as spaces
 
-N_ACTIONS = 72
+N_ACTIONS = 144  # 18 dark squares * 8 moves (4 single-step + 4 two-step)
 
 class CheckersEnv(AECEnv):
     metadata = {"render_modes": ["human", "ansi"], "name": "checkers_v0"}
@@ -36,7 +36,12 @@ class CheckersEnv(AECEnv):
         for row in range(6):
             for col in range(6):
                 if (row + col) % 2 == 1:  # Only dark squares are valid
-                    for dr, dc in [(-1, -1), (-1, 1), (1, -1), (1, 1)]:  # Diagonal moves
+                    # 1-step diagonal moves
+                    for dr, dc in [(-1, -1), (-1, 1), (1, -1), (1, 1)]:
+                        action_map[action_id] = ((row, col), (row + dr, col + dc))
+                        action_id += 1
+                    # 2-step diagonal moves (jumps)
+                    for dr, dc in [(-2, -2), (-2, 2), (2, -2), (2, 2)]:
                         action_map[action_id] = ((row, col), (row + dr, col + dc))
                         action_id += 1
         return action_map
