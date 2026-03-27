@@ -147,4 +147,4 @@ python myrunner.py
 python sample_run.py
 ```
 
-See `IMPLEMENTATION.md` for full details on the Actor-Critic agent and training loop.
+See `Reference/IMPLEMENTATION.md` for full details on the Actor-Critic agent and training loop.
