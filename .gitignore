@@ -2,3 +2,7 @@ play_random.py
 test_checkers.py
 myenv/
 __pycache__/
+test_model.pth
+trained_agent.pth
+extra_files/
+explanation.txt

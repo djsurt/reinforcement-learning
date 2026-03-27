@@ -1,39 +1,63 @@
-# Checkers Environment (`checkers.py`)
+# 6×6 Checkers (`mycheckersenv.py`)
 
-A 6×6 checkers environment built on [PettingZoo's AECEnv](https://pettingzoo.farama.org/api/aec/) (Agent-Environment Cycle), designed for two-player reinforcement learning.
+A two-player 6×6 checkers environment built on [PettingZoo's AECEnv](https://pettingzoo.farama.org/api/aec/) (Agent-Environment Cycle API).
+
+```python
+from mycheckersenv import CheckersEnv
+env = CheckersEnv(render_mode="human")
+```
+
+| Attribute             | Details                                      |
+|-----------------------|----------------------------------------------|
+| Agents                | 2                                            |
+| Agent Names           | `player_0`, `player_1`                       |
+| Action Space          | `Discrete(144)`                              |
+| Action Values         | `[0, 143]`                                   |
+| Observation Shape     | `(36,)`                                      |
+| Observation Values    | `[-2, 2]`                                    |
+| Action Mask Shape     | `(144,)`                                     |
+| Parallel API          | No                                           |
+| Manual Control        | No                                           |
 
 ---
 
-## Overview
+## Observation Space
 
-The environment follows the **AEC (turn-based) API**: agents take turns one at a time. The two agents are `"player_0"` and `"player_1"`. The game is played on a 6×6 board using only the dark squares (18 total playable squares).
+Each agent's observation is a dictionary with two keys:
 
-### Board Encoding
+```python
+spaces.Dict({
+    "observation": spaces.Box(low=-2, high=2, shape=(36,), dtype=np.int8),
+    "action_mask": spaces.Box(low=0,  high=1,  shape=(144,), dtype=np.int8),
+})
+```
 
-The board is a 6×6 NumPy array where each cell holds one of five values:
+### `"observation"` — shape `(36,)`
 
-| Value | Meaning               |
-|-------|-----------------------|
-| `0`   | Empty square          |
-| `1`   | player_0's piece      |
-| `2`   | player_0's king       |
-| `-1`  | player_1's piece      |
-| `-2`  | player_1's king       |
+The 6×6 board flattened into a 1D array of 36 integers. Each cell encodes the piece at that square:
+
+| Value | Meaning            |
+|-------|--------------------|
+| `0`   | Empty square       |
+| `1`   | player_0's piece   |
+| `2`   | player_0's king    |
+| `-1`  | player_1's piece   |
+| `-2`  | player_1's king    |
+
+**Perspective flip:** player_1's observation is negated (`obs = -obs`) so that both agents always see their own pieces as positive values. This allows a single policy network to play as either color.
 
 player_0 starts at the bottom (rows 4–5) and moves **up** (decreasing row index).
 player_1 starts at the top (rows 0–1) and moves **down** (increasing row index).
+
+### `"action_mask"` — shape `(144,)`
+
+A binary array of length 144. `mask[i] = 1` means action `i` is legal in the current state; `mask[i] = 0` means it is not. Agents must only select actions where the mask is `1`.
 
 ---
 
 ## Action Space
 
-```python
-self.action_spaces = {
-    agent: spaces.Discrete(N_ACTIONS)   # N_ACTIONS = 144
-}
-```
-
-Each agent's action is a **single integer from 0 to 143**. This integer is an *action ID* — a fixed index into a lookup table of every conceivable move on the board.
+Each agent's action is a single integer in `[0, 143]` — an index into a fixed lookup table (`action_map`) that maps every action ID to a `(from_pos, to_pos)` board coordinate pair.
 
 ### Why 144?
 
@@ -43,115 +67,84 @@ There are **18 dark squares** on a 6×6 board. From any square, a piece could th
 18 squares × 8 moves = 144 action IDs
 ```
 
-Most of these 144 actions will be illegal at any given moment (out-of-bounds, occupied, wrong direction, etc.). The **action mask** (described below) tells the agent which ones are legal right now.
+Most actions are illegal at any moment. The action mask (above) indicates which are legal.
 
----
+### Action Map
 
-## The `action_map` — Why It Exists
-
-```python
-self.action_map = self._build_action_map()
-# Example entries:
-# {0: ((1,0), (0,1)),   # action 0 = move from (1,0) to (0,1)
-#  1: ((1,0), (0,-1)),  # action 1 = move from (1,0) to (0,-1)  [out-of-bounds, always illegal]
-#  ...
-#  143: ((4,5), (2,3))} # action 143 = jump from (4,5) to (2,3)
-```
-
-**This is a fixed, pre-built dictionary that maps every action ID (0–143) to a pair of board coordinates: `(from_pos, to_pos)`.**
-
-The RL agent does not think in terms of coordinates — it thinks in terms of integers. But the board operates on coordinates. The `action_map` is the **translation layer** between them.
-
-The full pipeline for every turn:
-
-```
-1. action_map (built once at init)
-      action_id (int) → (from_pos, to_pos)
-
-2. _get_legal_moves() (computed each turn)
-      board state → list of legal (from_pos, to_pos) pairs
-
-3. _get_action_mask() (bridges steps 1 and 2)
-      for each action_id in action_map:
-          if (from_pos, to_pos) is in legal_moves → mask[action_id] = 1
-
-4. Agent picks an action_id where mask[action_id] == 1
-
-5. _apply_action() uses action_map to decode the chosen id
-      action_id → (from_pos, to_pos) → move on board
-```
-
-So `_get_legal_moves` answers "what moves are valid?", and `action_map` answers "what integer does the agent use to select each of those moves?". They work together — neither is sufficient alone.
-
----
-
-## Observation Space
+`env.action_map` is a pre-built dictionary mapping action IDs to coordinate pairs:
 
 ```python
-self.observation_spaces = {
-    agent: spaces.Dict({
-        "observation": spaces.Box(low=-2, high=2, shape=(36,), dtype=np.int8),
-        "action_mask": spaces.Box(low=0,  high=1,  shape=(144,), dtype=np.int8),
-    })
-}
+env.action_map[action_id]  # returns ((from_row, from_col), (to_row, to_col))
 ```
-
-Each agent's observation is a **dictionary with two keys**:
-
-### `"observation"` — shape `(36,)`
-
-The 6×6 board flattened into a 1D array of 36 integers (each in `[-2, 2]`).
-
-- Values use the same encoding as the internal board (`1`=piece, `2`=king, `-1`=opponent piece, etc.)
-- **Perspective flip**: player_1's observation is negated (`obs = -obs`) so that **both agents always see their own pieces as positive**. This lets a single policy network work for both players without needing to know which agent it is.
-
-### `"action_mask"` — shape `(144,)`
-
-A binary array of length 144. `mask[i] = 1` means action `i` is legal right now; `mask[i] = 0` means it is not. The agent should only sample from actions where the mask is `1`.
 
 ---
 
-## How `observe` Works
+## Rewards
+
+| Outcome      | player_0 | player_1 |
+|--------------|----------|----------|
+| player_0 wins | `+1`   | `-1`     |
+| player_1 wins | `-1`   | `+1`     |
+| Non-terminal step | `0` | `0`   |
+
+Rewards are **sparse** — agents only receive feedback at game end.
+
+---
+
+## Termination Conditions
+
+An episode terminates when either of the following is true:
+
+1. **No pieces remaining** — a player has all pieces captured.
+2. **No legal moves** — a player has pieces but no legal move available on their turn.
+
+The player who causes either condition wins. Draws are not part of the standard rules but can be enforced externally via a max-step limit (set to 200 in the training script).
+
+---
+
+## Game Rules
+
+- **Mandatory jumps**: if any capture (jump) is available, `_get_legal_moves` returns only jumps — the agent must capture.
+- **King promotion**: a piece reaching the opponent's back row (row 0 for player_0, row 5 for player_1) becomes a king (value `±2`) and may move in all 4 diagonal directions.
+
+---
+
+## Usage
 
 ```python
-def observe(self, agent):
-    return self._observe(agent)
+from mycheckersenv import CheckersEnv
+import numpy as np
 
-def _observe(self, agent):
-    obs = self.board.flatten().copy()       # 6×6 → (36,)
-    if agent == "player_1":
-        obs = -obs                          # flip so my pieces > 0
-    mask = self._get_action_mask(agent)     # (144,) binary array
-    return {"observation": obs, "action_mask": mask}
+env = CheckersEnv(render_mode="human")
+env.reset()
+
+for agent in env.agent_iter():
+    obs, reward, terminated, truncated, info = env.last()
+
+    if terminated or truncated:
+        env.step(None)
+        continue
+
+    action_mask = obs["action_mask"]
+    legal_actions = np.where(action_mask == 1)[0]
+    action = np.random.choice(legal_actions)  # replace with your policy
+
+    env.step(action)
 ```
 
-Step by step:
-
-1. **Flatten the board** — converts the 2D 6×6 grid into a 1D array of 36 values.
-2. **Flip perspective for player_1** — negates the array so player_1 sees its pieces as positive (1 or 2) and player_0's pieces as negative. player_0 sees the raw board, no flip needed.
-3. **Compute the action mask** — calls `_get_legal_moves`, then cross-references with `action_map` to mark which of the 144 action IDs are currently legal.
-4. **Return the dict** — packages both the board state and the mask so the agent has everything it needs.
-
 ---
 
-## Key Methods Summary
+## Quick Start: Training and Sample Run
 
-| Method | Purpose |
-|--------|---------|
-| `_build_action_map()` | One-time build of all 144 possible (from, to) coordinate pairs indexed by action ID |
-| `_init_board()` | Sets up the starting 6×6 board with pieces in rows 0–1 (player_1) and 4–5 (player_0) |
-| `reset()` | Resets game state, returns first observation |
-| `step(action)` | Applies the agent's chosen action ID, checks for winner, advances turn |
-| `observe(agent)` | Returns `{"observation": ..., "action_mask": ...}` for the given agent |
-| `_get_legal_moves(agent)` | Returns all valid `(from_pos, to_pos)` moves; **jumps are mandatory** if available |
-| `_get_action_mask(agent)` | Converts legal moves into a 144-length binary mask aligned to `action_map` |
-| `_apply_action(agent, action)` | Moves the piece, removes jumped pieces, promotes to king if applicable |
-| `_check_winner()` | Returns the winning agent if one player has no pieces or no legal moves, else `None` |
+```bash
+# Activate environment
+source myenv/bin/activate
 
----
+# Train the agent (saves trained_agent.pth)
+python myrunner.py
 
-## Game Rules Implemented
+# Watch a sample self-play game with the trained agent
+python sample_run.py
+```
 
-- **Mandatory jumps**: if any jump is available, `_get_legal_moves` returns only jumps (not quiet moves).
-- **King promotion**: a piece reaching the opponent's back row (row 0 for player_0, row 5 for player_1) becomes a king (value `±2`) and can move in all 4 diagonal directions.
-- **Win conditions**: you win if the opponent has no pieces left, or if it is the opponent's turn and they have no legal moves.
+See `IMPLEMENTATION.md` for full details on the Actor-Critic agent and training loop.
